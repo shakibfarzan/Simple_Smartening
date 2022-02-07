@@ -2,6 +2,7 @@
 #include <DS3231.h>
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
+
 #define Lock 3
 #define Buzzer 10
 #define clientRoom 0
@@ -12,6 +13,13 @@
 #define repairs 5
 #define productionRoom 6
 #define restaurant 7
+#define coridorLamp 0
+#define restaurantLamp 1
+#define otherLamps 2
+#define coridorSensor 3
+#define restaurantSensor 4
+#define switchLamps 7
+
 LiquidCrystal lcd(8,9,4,5,6,7);
 DS3231 rtc(A4, A5);
 
@@ -31,6 +39,9 @@ void enterPassCode();
 void (*LCDState) (void) = mainMenu;
 //--------------------------------
 
+//---------Lighting System States---------
+
+//----------------------------------------
 void setup() {
 //  fillPersonelListOnEEPROM();
   fillPersonelList();
