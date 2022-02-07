@@ -2,7 +2,16 @@
 #include <DS3231.h>
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
-
+#define Lock 3
+#define Buzzer 10
+#define clientRoom 0
+#define wc 1
+#define salesRoom 2
+#define meetingRoom 3
+#define managerRoom 4
+#define repairs 5
+#define productionRoom 6
+#define restaurant 7
 LiquidCrystal lcd(8,9,4,5,6,7);
 DS3231 rtc(A4, A5);
 
@@ -15,13 +24,15 @@ struct Person{
 
 Person persons[14];
 
+//-----------LCDStates------------
 void mainMenu();
 void personelList();
 void enterPassCode();
 void (*LCDState) (void) = mainMenu;
+//--------------------------------
 
 void setup() {
-  fillPersonelListOnEEPROM();
+//  fillPersonelListOnEEPROM();
   fillPersonelList();
   lcd.begin(20,4);
   Serial.begin(9600);
@@ -29,13 +40,19 @@ void setup() {
   rtc.begin();
   rtc.setDate(6,2,2022);
   rtc.setTime(11,13,8);
+  pinMode(Lock, OUTPUT);
+  pinMode(Buzzer, OUTPUT);
 }
 
 void loop() {
   (*LCDState)();
+  printListPerHours();
+  checkManagerRoom();
+  checkSensors();
   delay(50);
 }
 
+//---------------------Work with LCD----------------------
 int currentItemMain = 0;
 int cursorPlace = 0;
 void mainMenu(){
@@ -136,14 +153,15 @@ void enterPassCode(){
     if(pc == currentPerson.passCode){
       Time t = rtc.getTime();
       String packet = "Person "+String(currentPerson.personalCode)+","+String(t.hour)+":"+String(t.min)+",";
-      if(currentPerson.IO == 0){
-        packet+="IN";
-        persons[currentItemPersonel].IO = 1;
-        EEPROM.update(currentItemPersonel+7,1);
-      }else {
+      int item = currentItemPersonel * 7 + 7 + currentItemPersonel;
+      if(currentPerson.IO == 1){
         packet+="OUT";
         persons[currentItemPersonel].IO = 0;
-        EEPROM.update(currentItemPersonel+7,0);
+        EEPROM.update(item,0);
+      }else if(currentPerson.IO == 0){
+        packet+="IN";
+        persons[currentItemPersonel].IO = 1;
+        EEPROM.update(item,1);
       }
       Serial.println(packet);
       lcd.clear();
@@ -154,7 +172,114 @@ void enterPassCode(){
     }
     while(isOkBtn()){}
   }
+  if(isCancelBtn()){
+    lcd.clear();
+    LCDState = mainMenu;
+    while(isCancelBtn()){}
+  }
 }
+//---------------------------------------------------------
+
+
+//------------------print per hour list--------------------
+long printTimer = 0;
+void printListPerHours(){
+  if(printTimer >= 200){
+    printTimer = 0;
+    printPersonelListOnTerminal();
+  }else{
+    printTimer++;
+  }
+}
+//---------------------------------------------------------
+
+//---------------------Manager room lock-------------------
+void checkManagerRoom(){
+  Person manager = getManager();
+  if(manager.IO == 1){
+    digitalWrite(Lock, HIGH);
+  }else{
+    digitalWrite(Lock, LOW);
+  }
+}
+
+Person getManager(){
+//  with searching by loop
+//  for(int i = 0; i < 14; i++){
+//    if(persons[i].accessbility == 'M'){
+//      return persons[i];
+//    }
+//  }
+//  get from specific index
+  return persons[0];
+}
+//---------------------------------------------------------
+
+//--------------------Safety System------------------------
+void checkSensors(){
+  String defaultWarn = "Warning: Unsecure-> in "; 
+  Wire.requestFrom(0x26, 1);
+  byte r = Wire.read();
+  if(isAllPersonelOut()){
+    if(bitRead(r,clientRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("client room");
+    }
+    if(bitRead(r,wc) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("W.C");
+    }
+    if(bitRead(r,salesRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("sales room");
+    }
+    if(bitRead(r,meetingRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("meeting room");
+    }
+    if(bitRead(r,managerRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("manager room");
+    }
+    if(bitRead(r,repairs) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("repairs");
+    }
+    if(bitRead(r,productionRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("production room");
+    }
+    if(bitRead(r,restaurant) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("restaurant");
+    }
+  }
+  if(getManager().IO == 0){
+    if(bitRead(r,managerRoom) == 0){
+      digitalWrite(Buzzer, HIGH);
+      Serial.print(defaultWarn);
+      Serial.println("manager room");
+    }
+  }
+}
+
+boolean isAllPersonelOut(){
+  for(int i = 0; i < 14; i++){
+    if(persons[i].IO == 1){
+      return false;
+    }
+  }
+  return true;
+}
+//---------------------------------------------------------
 
 // ---------------------Intitialize------------------------
 void fillPersonelListOnEEPROM(){
@@ -178,7 +303,7 @@ void fillPersonelListOnEEPROM(){
     EEPROM.update(i+4,hpac);
     EEPROM.update(i+5,lpac);
     EEPROM.update(i+6,accessbility);
-//    EEPROM.update(i+7,0);
+    EEPROM.update(i+7,0);
     j++;
   }
 }
@@ -261,6 +386,13 @@ void printPersonelOnLCD(){
       lcd.print(persons[i].personalCode);
     }
   }
-  
+}
+
+void printPersonelListOnTerminal(){
+  String list = "SET ";
+  for(int i = 0; i < 14; i++){
+    list+=String(persons[i].personalCode)+","+String(persons[i].passCode)+","+String(persons[i].accessbility)+",";
+  }
+  Serial.println(list);
 }
 // --------------------------------------------------------
