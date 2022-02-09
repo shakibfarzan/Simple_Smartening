@@ -31,7 +31,7 @@ struct Person{
 };
 
 Person persons[14];
-
+boolean isAllPersonelOut;
 //-----------LCDStates------------
 void mainMenu();
 void personelList();
@@ -40,6 +40,15 @@ void (*LCDState) (void) = mainMenu;
 //--------------------------------
 
 //---------Lighting System States---------
+void coridorLampOff();
+void coridorLampOn();
+void coridorLampStayOn();
+void (*coridorLampState) (void) = coridorLampOff;
+
+void restaurantLampOff();
+void restaurantLampOn();
+void restaurantLampStayOn();
+void (*restaurantLampState) (void) = restaurantLampOff;
 
 //----------------------------------------
 void setup() {
@@ -53,10 +62,12 @@ void setup() {
   rtc.setTime(11,13,8);
   pinMode(Lock, OUTPUT);
   pinMode(Buzzer, OUTPUT);
+  updateIsAllPersonelOut();
 }
 
 void loop() {
   (*LCDState)();
+  lightingSystem();
   printListPerHours();
   checkManagerRoom();
   checkSensors();
@@ -169,10 +180,12 @@ void enterPassCode(){
         packet+="OUT";
         persons[currentItemPersonel].IO = 0;
         EEPROM.update(item,0);
+        updateIsAllPersonelOut();
       }else if(currentPerson.IO == 0){
         packet+="IN";
         persons[currentItemPersonel].IO = 1;
         EEPROM.update(item,1);
+        isAllPersonelOut = false;
       }
       Serial.println(packet);
       lcd.clear();
@@ -231,7 +244,7 @@ void checkSensors(){
   String defaultWarn = "Warning: Unsecure-> in "; 
   Wire.requestFrom(0x26, 1);
   byte r = Wire.read();
-  if(isAllPersonelOut()){
+  if(isAllPersonelOut){
     if(bitRead(r,clientRoom) == 0){
       digitalWrite(Buzzer, HIGH);
       Serial.print(defaultWarn);
@@ -281,14 +294,113 @@ void checkSensors(){
     }
   }
 }
+//---------------------------------------------------------
 
-boolean isAllPersonelOut(){
-  for(int i = 0; i < 14; i++){
-    if(persons[i].IO == 1){
-      return false;
-    }
+//--------------------Lighting System----------------------
+int stayingCoridorLampOn = 0;
+void coridorLampOff(){
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  if(bitRead(r,coridorSensor) == 0){
+    coridorLampState = coridorLampOn;
+  }else{
+    Wire.beginTransmission(0x25);
+    byte newIn = r & 254;
+    Wire.write(newIn);
+    Wire.endTransmission();
   }
-  return true;
+}
+
+void coridorLampOn(){
+  stayingCoridorLampOn = 0;
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  Wire.beginTransmission(0x25);
+  byte newIn = r | 1;
+  Wire.write(newIn);
+  Wire.endTransmission();
+  coridorLampState = coridorLampStayOn;
+}
+
+void coridorLampStayOn(){
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  Wire.beginTransmission(0x25);
+  byte newIn = r | 8;
+  Wire.write(newIn);
+  Wire.endTransmission();
+  if(bitRead(r,coridorSensor) == 1){
+    stayingCoridorLampOn++;
+    if(stayingCoridorLampOn >= 100){
+      coridorLampState = coridorLampOff;
+    }
+  }else{
+    stayingCoridorLampOn = 0;
+  }
+}
+
+int stayingRestaurantLampOn = 0;
+void restaurantLampOff(){
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  if(bitRead(r,restaurantSensor) == 0){
+    restaurantLampState = restaurantLampOn;
+  }else{
+    Wire.beginTransmission(0x25);
+    byte newIn = r & 253;
+    Wire.write(newIn);
+    Wire.endTransmission();
+  }
+}
+
+void restaurantLampOn(){
+  stayingRestaurantLampOn = 0;
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  Wire.beginTransmission(0x25);
+  byte newIn = r | 2;
+  Wire.write(newIn);
+  Wire.endTransmission();
+  restaurantLampState = restaurantLampStayOn;
+}
+
+void restaurantLampStayOn(){
+  Wire.requestFrom(0x25,1);
+  byte r = Wire.read();
+  Wire.beginTransmission(0x25);
+  byte newIn = r | 16;
+  Wire.write(newIn);
+  Wire.endTransmission();
+  if(bitRead(r,restaurantSensor) == 1){
+    stayingRestaurantLampOn++;
+    if(stayingRestaurantLampOn >= 200){
+      restaurantLampState = restaurantLampOff;
+    }
+  }else{
+    stayingRestaurantLampOn = 0;
+  }
+}
+
+void lightingSystem(){
+  if(isAllPersonelOut){
+    Wire.beginTransmission(0x25);
+    Wire.write(248);
+    Wire.endTransmission();
+  }else{
+    (*coridorLampState)();
+    (*restaurantLampState)();
+    Wire.requestFrom(0x25,1);
+    byte r = Wire.read();
+    Wire.beginTransmission(0x25);
+    byte newIn;
+    if(bitRead(r,switchLamps) == 0){
+      newIn = r | 132;
+    }else{
+      newIn = r & 251;
+    }
+    Wire.write(newIn);
+    Wire.endTransmission();
+  }
 }
 //---------------------------------------------------------
 
@@ -405,5 +517,15 @@ void printPersonelListOnTerminal(){
     list+=String(persons[i].personalCode)+","+String(persons[i].passCode)+","+String(persons[i].accessbility)+",";
   }
   Serial.println(list);
+}
+
+void updateIsAllPersonelOut(){
+  for(int i = 0; i < 14; i++){
+    if(persons[i].IO == 1){
+      isAllPersonelOut = false;
+      return;
+    }
+  }
+  isAllPersonelOut = true;
 }
 // --------------------------------------------------------
