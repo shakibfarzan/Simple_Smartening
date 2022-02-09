@@ -3,22 +3,20 @@
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
 
-#define Lock 3
-#define Buzzer 10
-#define clientRoom 0
-#define wc 1
-#define salesRoom 2
-#define meetingRoom 3
-#define managerRoom 4
-#define repairs 5
-#define productionRoom 6
-#define restaurant 7
-#define coridorLamp 0
-#define restaurantLamp 1
-#define otherLamps 2
-#define coridorSensor 3
-#define restaurantSensor 4
-#define switchLamps 7
+#define LOCK 3
+#define BUZZER 10
+#define CLIENT_ROOM 0
+#define WC 1
+#define SALES_ROOM 2
+#define MEETING_ROOM 3
+#define MANAGER_ROOM 4
+#define REPAIRS 5
+#define PRODUCTION_ROOM 6
+#define RESTAURANT 7
+#define CORIDOR_SENSOR 3
+#define RESTAURANT_SENSOR 4
+#define SWITCH_LAMPS 7
+#define FAN A3
 
 LiquidCrystal lcd(8,9,4,5,6,7);
 DS3231 rtc(A4, A5);
@@ -60,8 +58,9 @@ void setup() {
   rtc.begin();
   rtc.setDate(6,2,2022);
   rtc.setTime(11,13,8);
-  pinMode(Lock, OUTPUT);
-  pinMode(Buzzer, OUTPUT);
+  pinMode(LOCK, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+  pinMode(FAN, OUTPUT);
   updateIsAllPersonelOut();
 }
 
@@ -71,6 +70,8 @@ void loop() {
   printListPerHours();
   checkManagerRoom();
   checkSensors();
+  getListFromSerial();
+  off_onWCFan();
   delay(50);
 }
 
@@ -208,7 +209,7 @@ void enterPassCode(){
 //------------------print per hour list--------------------
 long printTimer = 0;
 void printListPerHours(){
-  if(printTimer >= 200){
+  if(printTimer >= 72000){
     printTimer = 0;
     printPersonelListOnTerminal();
   }else{
@@ -221,9 +222,9 @@ void printListPerHours(){
 void checkManagerRoom(){
   Person manager = getManager();
   if(manager.IO == 1){
-    digitalWrite(Lock, HIGH);
+    digitalWrite(LOCK, HIGH);
   }else{
-    digitalWrite(Lock, LOW);
+    digitalWrite(LOCK, LOW);
   }
 }
 
@@ -245,50 +246,50 @@ void checkSensors(){
   Wire.requestFrom(0x26, 1);
   byte r = Wire.read();
   if(isAllPersonelOut){
-    if(bitRead(r,clientRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,CLIENT_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("client room");
     }
-    if(bitRead(r,wc) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,WC) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("W.C");
     }
-    if(bitRead(r,salesRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,SALES_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("sales room");
     }
-    if(bitRead(r,meetingRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,MEETING_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("meeting room");
     }
-    if(bitRead(r,managerRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,MANAGER_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("manager room");
     }
-    if(bitRead(r,repairs) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,REPAIRS) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("repairs");
     }
-    if(bitRead(r,productionRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,PRODUCTION_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("production room");
     }
-    if(bitRead(r,restaurant) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,RESTAURANT) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("restaurant");
     }
   }
   if(getManager().IO == 0){
-    if(bitRead(r,managerRoom) == 0){
-      digitalWrite(Buzzer, HIGH);
+    if(bitRead(r,MANAGER_ROOM) == 0){
+      digitalWrite(BUZZER, HIGH);
       Serial.print(defaultWarn);
       Serial.println("manager room");
     }
@@ -301,7 +302,7 @@ int stayingCoridorLampOn = 0;
 void coridorLampOff(){
   Wire.requestFrom(0x25,1);
   byte r = Wire.read();
-  if(bitRead(r,coridorSensor) == 0){
+  if(bitRead(r,CORIDOR_SENSOR) == 0){
     coridorLampState = coridorLampOn;
   }else{
     Wire.beginTransmission(0x25);
@@ -329,7 +330,7 @@ void coridorLampStayOn(){
   byte newIn = r | 8;
   Wire.write(newIn);
   Wire.endTransmission();
-  if(bitRead(r,coridorSensor) == 1){
+  if(bitRead(r,CORIDOR_SENSOR) == 1){
     stayingCoridorLampOn++;
     if(stayingCoridorLampOn >= 100){
       coridorLampState = coridorLampOff;
@@ -343,7 +344,7 @@ int stayingRestaurantLampOn = 0;
 void restaurantLampOff(){
   Wire.requestFrom(0x25,1);
   byte r = Wire.read();
-  if(bitRead(r,restaurantSensor) == 0){
+  if(bitRead(r,RESTAURANT_SENSOR) == 0){
     restaurantLampState = restaurantLampOn;
   }else{
     Wire.beginTransmission(0x25);
@@ -371,7 +372,7 @@ void restaurantLampStayOn(){
   byte newIn = r | 16;
   Wire.write(newIn);
   Wire.endTransmission();
-  if(bitRead(r,restaurantSensor) == 1){
+  if(bitRead(r,RESTAURANT_SENSOR) == 1){
     stayingRestaurantLampOn++;
     if(stayingRestaurantLampOn >= 200){
       restaurantLampState = restaurantLampOff;
@@ -393,13 +394,43 @@ void lightingSystem(){
     byte r = Wire.read();
     Wire.beginTransmission(0x25);
     byte newIn;
-    if(bitRead(r,switchLamps) == 0){
+    if(bitRead(r,SWITCH_LAMPS) == 0){
       newIn = r | 132;
     }else{
       newIn = r & 251;
     }
     Wire.write(newIn);
     Wire.endTransmission();
+  }
+}
+//---------------------------------------------------------
+
+//--------------------Input in serial----------------------
+void getListFromSerial(){
+  if(Serial.available()){
+    String cmd = Serial.readStringUntil('\r');
+    Serial.println(cmd);
+    if(cmd.equals("SET")){
+      printPersonelListOnTerminal();
+    }else{
+      Serial.println("Wrong input!");
+      Serial.println("You can input 'SET' to get personel list");
+    }
+  }
+}
+//---------------------------------------------------------
+
+//------------------------WC Fan---------------------------
+int fanTimer = 0;
+void off_onWCFan(){
+  if(isAllPersonelOut){
+    fanTimer++;
+    if(fanTimer >= 140){
+      digitalWrite(FAN, LOW);
+    }
+  }else{
+    fanTimer = 0;
+    digitalWrite(FAN, HIGH);
   }
 }
 //---------------------------------------------------------
