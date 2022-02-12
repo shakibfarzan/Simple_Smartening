@@ -22,6 +22,7 @@
 #define COOLER_SPEED 11
 #define HEATER 2
 #define TEMP_SENSOR A1
+#define TIMES_INDEX 113
 
 LiquidCrystal lcd(8,9,4,5,6,7);
 DS3231 rtc(A4, A5);
@@ -43,6 +44,8 @@ void personelList();
 void enterPassCode();
 void settingMenu();
 void editIdealTemp();
+void weeklyProgramList();
+void editTime();
 void (*LCDState) (void) = mainMenu;
 //--------------------------------
 
@@ -58,8 +61,20 @@ void restaurantLampStayOn();
 void (*restaurantLampState) (void) = restaurantLampOff;
 
 //----------------------------------------
+
+//----Air Conditioning System States----
+void offAirSystem();
+void onPump();
+void onPump_onMotor();
+void onMotor();
+void onSpeed();
+void onHeater();
+void (*airState) (void) = offAirSystem;
+//--------------------------------------
+
 void setup() {
 //  fillPersonelListOnEEPROM();
+//  fillAllTimesToZero();
   fillPersonelList();
   lcd.begin(20,4);
   Serial.begin(9600);
@@ -70,6 +85,10 @@ void setup() {
   pinMode(LOCK, OUTPUT);
   pinMode(BUZZER, OUTPUT);
   pinMode(FAN, OUTPUT);
+  pinMode(WATER_PUMP, OUTPUT);
+  pinMode(COOLER_MOTOR, OUTPUT);
+  pinMode(COOLER_SPEED, OUTPUT);
+  pinMode(HEATER, OUTPUT);
   updateIsAllPersonelOut();
   initTimerRTC();
 }
@@ -82,6 +101,7 @@ void loop() {
   checkSensors();
   getListFromSerial();
   off_onWCFan();
+  airConditioningSystem();
   delay(50);
 }
 
@@ -153,6 +173,7 @@ void settingMenu(){
   }else if(isOkBtn() && currentSettingItem == 1){
     lcd.clear();
     currentSettingItem = 0;
+    LCDState = weeklyProgramList;
     while(isOkBtn()){}
   }else if(isCancelBtn()){
     lcd.clear();
@@ -166,7 +187,7 @@ void editIdealTemp(){
   lcd.setCursor(2,0);
   lcd.print("Ideal Temp: ");
   lcd.print(tmpIdealTemp);
-  if(isUpBtn() && tmpIdealTemp<255){
+  if(isUpBtn() && tmpIdealTemp<99){
     tmpIdealTemp++;
     while(isUpBtn()){}
   }else if(isDownBtn() && tmpIdealTemp>0){
@@ -182,6 +203,81 @@ void editIdealTemp(){
   }
 }
 
+byte currentDayItem = 0, hourOn, minOn, hourOff, minOff, cursorPlaceTime = 0; 
+void weeklyProgramList(){
+  printTimesOnLCD();
+  if(isUpBtn() && currentDayItem > 0){
+    lcd.clear();
+    currentDayItem--;
+    while(isUpBtn()){}
+  }else if(isDownBtn() && currentDayItem < 6){
+    lcd.clear();
+    currentDayItem++;
+    while(isDownBtn()){}
+  }else if(isCancelBtn()){
+    lcd.clear();
+    LCDState = settingMenu;
+    while(isCancelBtn()){}
+  }else if(isOkBtn()){
+    lcd.clear();
+    int index = TIMES_INDEX + (currentDayItem*4);
+    hourOn = EEPROM.read(index);
+    minOn = EEPROM.read(index+1);
+    hourOff = EEPROM.read(index+2);
+    minOff = EEPROM.read(index+3); 
+    cursorPlaceTime = 0;
+    LCDState = editTime;
+    while(isOkBtn()){}
+  }
+}
+
+void editTime(){
+    lcd.setCursor(7,0);
+    lcd.print("ON");
+    lcd.setCursor(13,0);
+    lcd.print("OFF");
+    lcd.setCursor(0,1);
+    printRowWithoutEEPROM();
+    if(isOkBtn()){
+      setTimes(hourOn,minOn,hourOff,minOff,currentDayItem);
+      lcd.clear();
+      LCDState = weeklyProgramList;
+      while(isOkBtn()){}
+    }else if(isRightBtn() && cursorPlaceTime < 3){
+      cursorPlaceTime++;
+      while(isRightBtn()){}
+    }else if(isLeftBtn() && cursorPlaceTime > 0){
+      cursorPlaceTime--;
+      while(isLeftBtn()){}
+    }else if(isUpBtn()){
+      if(cursorPlaceTime == 0 && hourOn < 24){
+        hourOn++;
+      }else if(cursorPlaceTime == 1 && minOn < 59){
+        minOn++;
+      }else if(cursorPlaceTime == 2 && hourOff < 24){
+        hourOff++;
+      }else if(cursorPlaceTime == 3 && minOff < 59){
+        minOff++;
+      }
+      while(isUpBtn()){}
+    }else if(isDownBtn()){
+      if(cursorPlaceTime == 0 && hourOn > 0){
+        hourOn--;
+      }else if(cursorPlaceTime == 1 && minOn > 0){
+        minOn--;
+      }else if(cursorPlaceTime == 2 && hourOff > 0){
+        hourOff--;
+      }else if(cursorPlaceTime == 3 && minOff > 0){
+        minOff--;
+      }
+      while(isDownBtn()){}
+    }else if(isCancelBtn()){
+      lcd.clear();
+      LCDState = weeklyProgramList;
+      while(isCancelBtn()){}
+    }
+}
+
 byte currentItemPersonel = 0;
 void personelList(){
   printPersonelOnLCD();
@@ -191,18 +287,14 @@ void personelList(){
     LCDState = enterPassCode;
     while(isOkBtn()){}
   }
-  if(isUpBtn()){
+  if(isUpBtn() && currentItemPersonel > 0){
     lcd.clear();
-    if(currentItemPersonel > 0){
-      currentItemPersonel--;
-    }
+    currentItemPersonel--;
     while(isUpBtn()){}
   }
-  if(isDownBtn()){
+  if(isDownBtn() && currentItemPersonel < 13){
     lcd.clear();
-    if(currentItemPersonel < 13){
-      currentItemPersonel++;
-    }
+    currentItemPersonel++;
     while(isDownBtn()){}
   }
   if(isCancelBtn()){
@@ -322,17 +414,6 @@ void checkManagerRoom(){
   }else{
     digitalWrite(LOCK, LOW);
   }
-}
-
-Person getManager(){
-//  with searching by loop
-//  for(int i = 0; i < 14; i++){
-//    if(persons[i].accessbility == 'M'){
-//      return persons[i];
-//    }
-//  }
-//  get from specific index
-  return persons[0];
 }
 //---------------------------------------------------------
 
@@ -531,6 +612,35 @@ void off_onWCFan(){
 }
 //---------------------------------------------------------
 
+//----------------Air conditioning system------------------
+void airConditioningSystem(){
+  
+  if(!isAllPersonelOut || isCorrectTime()){
+    (*airState)();
+  }else{
+    digitalWrite(WATER_PUMP,LOW);
+    digitalWrite(COOLER_MOTOR, LOW);
+    digitalWrite(COOLER_SPEED, LOW);
+    digitalWrite(HEATER,LOW);
+  }
+}
+
+boolean isCorrectTime(){
+  int weekday = dayOfWeek(t.date, t.mon, t.year);
+  byte p = weekday * 4;
+  byte ho = EEPROM.read(TIMES_INDEX + p);
+  byte mo = EEPROM.read(TIMES_INDEX + p + 1);
+  byte hof = EEPROM.read(TIMES_INDEX + p + 2);
+  byte mof = EEPROM.read(TIMES_INDEX + p + 3);
+
+  return (t.hour > ho && t.hour < hof) || (t.hour == ho && t.min >= mo) || (t.hour == hof && t.min < mof);
+}
+
+void offAirSystem(){
+  
+}
+//---------------------------------------------------------
+
 // ---------------------Intitialize------------------------
 void fillPersonelListOnEEPROM(){
 // fake data
@@ -576,6 +686,12 @@ void fillPersonelList(){
   }
 }
 
+void fillAllTimesToZero(){
+  for(int i = 113; i < 142; i++){
+    EEPROM.update(i,0);
+  }
+}
+
 byte getIdealTemp(){
   return EEPROM.read(112);
 }
@@ -587,6 +703,17 @@ void setIdealTemp(byte temp){
 int getCurrentTemp(){
   return (long)analogRead(A1) * 500 / 1024;
 }
+
+Person getManager(){
+//  with searching by loop
+//  for(int i = 0; i < 14; i++){
+//    if(persons[i].accessbility == 'M'){
+//      return persons[i];
+//    }
+//  }
+//  get from specific index
+  return persons[0];
+} 
 
 // --------------------------------------------------------
 
@@ -608,6 +735,112 @@ boolean isOkBtn(){
 }
 boolean isCancelBtn(){
   return analogRead(A0) >= 830 && analogRead(A0) < 1023;
+}
+
+void setTimes(byte onHour, byte onMin, byte offHour, byte offMin, byte weekday){
+  int p = weekday * 4;
+  EEPROM.write(TIMES_INDEX + p, onHour);
+  EEPROM.write(TIMES_INDEX + p + 1, onMin);
+  EEPROM.write(TIMES_INDEX + p + 2, offHour);
+  EEPROM.write(TIMES_INDEX + p + 3, offMin);
+}
+
+void printTimesOnLCD(){
+  lcd.setCursor(7,0);
+  lcd.print("ON");
+  lcd.setCursor(13,0);
+  lcd.print("OFF");
+  if(currentDayItem < 3){
+    lcd.setCursor(0, currentDayItem+1);
+    lcd.print('>');
+    lcd.setCursor(1,1);
+    printRow(0);
+    lcd.setCursor(1,2);
+    printRow(1);
+    lcd.setCursor(1,3);
+    printRow(2);
+  }else if(currentDayItem < 6){
+    lcd.setCursor(0, currentDayItem-2);
+    lcd.print('>');
+    lcd.setCursor(1,1);
+    printRow(3);
+    lcd.setCursor(1,2);
+    printRow(4);
+    lcd.setCursor(1,3);
+    printRow(5);
+  }else if(currentDayItem == 6){
+    lcd.setCursor(0,1);
+    lcd.print('>');
+    lcd.setCursor(1,1);
+    printRow(6);
+  }
+}
+
+void printRow(byte day){
+  int index = TIMES_INDEX + (day*4);
+  String weekday = getWeekdayName(day);
+  byte ho = EEPROM.read(index);
+  byte mo = EEPROM.read(index+1);
+  byte hof = EEPROM.read(index+2);
+  byte mof = EEPROM.read(index+3);
+  lcd.print(weekday);
+  lcd.print(": ");
+  if(ho < 10){
+    lcd.print("0");
+  }
+  lcd.print(ho);
+  lcd.print(":");
+  if(mo < 10){
+    lcd.print("0");
+  }
+  lcd.print(mo);
+  lcd.print(" ");
+  if(hof < 10){
+    lcd.print("0");
+  }
+  lcd.print(hof);
+  lcd.print(":");
+  if(mof < 10){
+    lcd.print("0");
+  }
+  lcd.print(mof);
+}
+
+void printRowWithoutEEPROM(){
+  String weekday = getWeekdayName(currentDayItem);
+  lcd.print(weekday);
+  lcd.print(": ");
+  if(hourOn < 10){
+    lcd.print("0");
+  }
+  lcd.print(hourOn);
+  lcd.print(":");
+  if(minOn < 10){
+    lcd.print("0");
+  }
+  lcd.print(minOn);
+  lcd.print(" ");
+  if(hourOff < 10){
+    lcd.print("0");
+  }
+  lcd.print(hourOff);
+  lcd.print(":");
+  if(minOff < 10){
+    lcd.print("0");
+  }
+  lcd.print(minOff);
+}
+
+String getWeekdayName(byte day){
+  switch(day){
+    case 0: return "SUN";
+    case 1: return "MON";
+    case 2: return "TUE";
+    case 3: return "WED";
+    case 4: return "TUR";
+    case 5: return "FRI";
+    case 6: return "SAT";
+  }
 }
 
 void printPersonelOnLCD(){
@@ -682,24 +915,13 @@ ISR(TIMER1_COMPA_vect){
   t = rtc.getTime();
 }
 
-//  AUTHOR: Rob Tillaart
-// VERSION: 2013-09-01
-// PURPOSE: experimental day of week code (hardly tested)
-// Released to the public domain
-#define LEAP_YEAR(Y)     ( (Y>0) && !(Y%4) && ( (Y%100) || !(Y%400) ))     // from time-lib
-
-int dayOfWeek(int year, int month, int day)
+int dayOfWeek(int d, int m, int y)
 {
-  int months[] = {
-    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365         };   // days until 1st of month
-
-  int days = year * 365;        // days until year 
-  for (int i = 4; i < year; i += 4) if (LEAP_YEAR(i) ) days++;     // adjust leap years, test only multiple of 4 of course
-
-  days += months[month-1] + day;    // add the days of this year
-  if ((month > 2) && LEAP_YEAR(year)) days++;  // adjust 1 if this year is a leap year, but only after febr
-
-  return days % 7;   // remove all multiples of 7
+    static int t[] = { 0, 3, 2, 5, 0, 3,
+                       5, 1, 4, 6, 2, 4 };
+    y -= m < 3;
+    return ( y + y / 4 - y / 100 +
+             y / 400 + t[m - 1] + d) % 7;
 }
 
 // --------------------------------------------------------
