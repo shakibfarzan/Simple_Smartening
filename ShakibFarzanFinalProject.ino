@@ -17,6 +17,11 @@
 #define RESTAURANT_SENSOR 4
 #define SWITCH_LAMPS 7
 #define FAN A3
+#define WATER_PUMP 13
+#define COOLER_MOTOR 12
+#define COOLER_SPEED 11
+#define HEATER 2
+#define TEMP_SENSOR A1
 
 LiquidCrystal lcd(8,9,4,5,6,7);
 DS3231 rtc(A4, A5);
@@ -30,10 +35,14 @@ struct Person{
 
 Person persons[14];
 boolean isAllPersonelOut;
+Time t;
+
 //-----------LCDStates------------
 void mainMenu();
 void personelList();
 void enterPassCode();
+void settingMenu();
+void editIdealTemp();
 void (*LCDState) (void) = mainMenu;
 //--------------------------------
 
@@ -62,6 +71,7 @@ void setup() {
   pinMode(BUZZER, OUTPUT);
   pinMode(FAN, OUTPUT);
   updateIsAllPersonelOut();
+  initTimerRTC();
 }
 
 void loop() {
@@ -76,27 +86,103 @@ void loop() {
 }
 
 //---------------------Work with LCD----------------------
-int currentItemMain = 0;
-int cursorPlace = 0;
+void printMenu(){
+  lcd.setCursor(2,0);
+  lcd.print("Current temp: ");
+  lcd.print(getCurrentTemp());
+  lcd.setCursor(2,1);
+  lcd.print("Ideal temp: ");
+  lcd.print(getIdealTemp());
+  lcd.setCursor(2,2);
+  lcd.print("Personel list");
+  lcd.setCursor(2,3);
+  lcd.print("Setting");
+}
+
+byte currentItemMain = 2;
+byte cursorPlace = 0;
+byte frstNum = 0, secNum = 0, trdNum = 0, frtNum = 0;
 void mainMenu(){
-  lcd.setCursor(0,0);
+  printMenu();
+  lcd.setCursor(0,currentItemMain);
+  lcd.print('>');
   cursorPlace = 0;
-  if (isUpBtn()){
-    currentItemMain++;
-    while(isUpBtn()){}
-  }else if(isDownBtn()){
+  if (isUpBtn() && currentItemMain == 3){
     currentItemMain--;
+    lcd.clear();
+    while(isUpBtn()){}
+  }else if(isDownBtn() && currentItemMain == 2){
+    currentItemMain++;
+    lcd.clear();
     while(isDownBtn()){}
-  }else if(isOkBtn() && currentItemMain == 1){
+  }else if(isOkBtn() && currentItemMain == 2){
     lcd.clear();
     LCDState = personelList;
     while(isOkBtn()){}
+  }else if(isOkBtn() && currentItemMain == 3){
+    lcd.clear();
+    frstNum = 0, secNum = 0, trdNum = 0, frtNum = 0;
+    LCDState = enterPassCode;
+    while(isOkBtn()){}
   }
-  lcd.print(currentItemMain);
 }
 
-int currentItemPersonel = 0;
-byte frstNum = 0, secNum = 0, trdNum = 0, frtNum = 0;
+byte currentSettingItem = 0;
+byte tmpIdealTemp;
+void settingMenu(){
+  lcd.setCursor(2,0);
+  lcd.print("Edit ideal temp");
+  lcd.setCursor(2,1);
+  lcd.print("Set weekly program");
+  lcd.setCursor(0,currentSettingItem);
+  lcd.print('>');
+  if(isUpBtn() && currentSettingItem == 1){
+    currentSettingItem--;
+    lcd.clear();
+    while(isUpBtn()){}
+  }else if(isDownBtn() && currentSettingItem == 0){
+    currentSettingItem++;
+    lcd.clear();
+    while(isDownBtn()){}
+  }else if(isOkBtn() && currentSettingItem == 0){
+    lcd.clear();
+    currentSettingItem = 0;
+    tmpIdealTemp = getIdealTemp();
+    LCDState = editIdealTemp;
+    while(isOkBtn()){}
+  }else if(isOkBtn() && currentSettingItem == 1){
+    lcd.clear();
+    currentSettingItem = 0;
+    while(isOkBtn()){}
+  }else if(isCancelBtn()){
+    lcd.clear();
+    currentSettingItem = 0;
+    LCDState = mainMenu;
+    while(isCancelBtn()){}
+  }
+}
+
+void editIdealTemp(){
+  lcd.setCursor(2,0);
+  lcd.print("Ideal Temp: ");
+  lcd.print(tmpIdealTemp);
+  if(isUpBtn() && tmpIdealTemp<255){
+    tmpIdealTemp++;
+    while(isUpBtn()){}
+  }else if(isDownBtn() && tmpIdealTemp>0){
+    tmpIdealTemp--;
+    while(isDownBtn()){}
+  }else if(isOkBtn()){
+    setIdealTemp(tmpIdealTemp);
+    LCDState = settingMenu;
+    while(isOkBtn()){}
+  }else if(isCancelBtn()){
+    LCDState = settingMenu;
+    while(isCancelBtn()){}
+  }
+}
+
+byte currentItemPersonel = 0;
 void personelList(){
   printPersonelOnLCD();
   if (isOkBtn()){
@@ -172,29 +258,39 @@ void enterPassCode(){
   }
   if(isOkBtn()){
     unsigned int pc = ((String(frstNum))+(String(secNum))+(String(trdNum))+(String(frtNum))).toInt();
-    Person currentPerson = persons[currentItemPersonel];
-    if(pc == currentPerson.passCode){
-      Time t = rtc.getTime();
-      String packet = "Person "+String(currentPerson.personalCode)+","+String(t.hour)+":"+String(t.min)+",";
-      int item = currentItemPersonel * 7 + 7 + currentItemPersonel;
-      if(currentPerson.IO == 1){
-        packet+="OUT";
-        persons[currentItemPersonel].IO = 0;
-        EEPROM.update(item,0);
-        updateIsAllPersonelOut();
-      }else if(currentPerson.IO == 0){
-        packet+="IN";
-        persons[currentItemPersonel].IO = 1;
-        EEPROM.update(item,1);
-        isAllPersonelOut = false;
+    if(currentItemMain == 3){
+      if(pc == getManager().passCode){
+        lcd.clear();
+        LCDState = settingMenu;
+      }else{
+        lcd.setCursor(0,2);
+        lcd.print("Wrong passcode!");
       }
-      Serial.println(packet);
-      lcd.clear();
-      LCDState = mainMenu;
-    }else{
-      lcd.setCursor(0,2);
-      lcd.print("Wrong passcode!");
+    }else {
+      Person currentPerson = persons[currentItemPersonel];
+      if(pc == currentPerson.passCode){
+        String packet = "Person "+String(currentPerson.personalCode)+","+String(t.hour)+":"+String(t.min)+",";
+        int item = currentItemPersonel * 7 + 7 + currentItemPersonel;
+        if(currentPerson.IO == 1){
+          packet+="OUT";
+          persons[currentItemPersonel].IO = 0;
+          EEPROM.update(item,0);
+          updateIsAllPersonelOut();
+        }else if(currentPerson.IO == 0){
+          packet+="IN";
+          persons[currentItemPersonel].IO = 1;
+          EEPROM.update(item,1);
+          isAllPersonelOut = false;
+        }
+        Serial.println(packet);
+        lcd.clear();
+        LCDState = mainMenu;
+      }else{
+        lcd.setCursor(0,2);
+        lcd.print("Wrong passcode!");
+      }
     }
+    
     while(isOkBtn()){}
   }
   if(isCancelBtn()){
@@ -480,6 +576,18 @@ void fillPersonelList(){
   }
 }
 
+byte getIdealTemp(){
+  return EEPROM.read(112);
+}
+
+void setIdealTemp(byte temp){
+  EEPROM.update(112, temp);
+}
+
+int getCurrentTemp(){
+  return (long)analogRead(A1) * 500 / 1024;
+}
+
 // --------------------------------------------------------
 
 // ------------------------Utils---------------------------
@@ -559,4 +667,39 @@ void updateIsAllPersonelOut(){
   }
   isAllPersonelOut = true;
 }
+
+void initTimerRTC(){
+  TCNT1 = 0;
+  OCR1A = 15625 - 1;
+  TCCR1A = 0;
+  TCCR1B = 0x0D;
+
+  TIMSK1 = (1<<OCIE1A);
+  interrupts();
+}
+
+ISR(TIMER1_COMPA_vect){
+  t = rtc.getTime();
+}
+
+//  AUTHOR: Rob Tillaart
+// VERSION: 2013-09-01
+// PURPOSE: experimental day of week code (hardly tested)
+// Released to the public domain
+#define LEAP_YEAR(Y)     ( (Y>0) && !(Y%4) && ( (Y%100) || !(Y%400) ))     // from time-lib
+
+int dayOfWeek(int year, int month, int day)
+{
+  int months[] = {
+    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365         };   // days until 1st of month
+
+  int days = year * 365;        // days until year 
+  for (int i = 4; i < year; i += 4) if (LEAP_YEAR(i) ) days++;     // adjust leap years, test only multiple of 4 of course
+
+  days += months[month-1] + day;    // add the days of this year
+  if ((month > 2) && LEAP_YEAR(year)) days++;  // adjust 1 if this year is a leap year, but only after febr
+
+  return days % 7;   // remove all multiples of 7
+}
+
 // --------------------------------------------------------
