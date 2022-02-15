@@ -75,7 +75,7 @@ void (*airState) (void) = offAirSystem;
 
 void setup() {
   //  fillPersonelListOnEEPROM();
-//    fillAllTimesToZero();
+  fillAllTimesToZero();
   fillPersonelList();
   lcd.begin(20, 4);
   Serial.begin(9600);
@@ -91,7 +91,11 @@ void setup() {
   pinMode(COOLER_SPEED, OUTPUT);
   pinMode(HEATER, OUTPUT);
   updateIsAllPersonelOut();
+  t = rtc.getTime();
   initTimerRTC();
+  if(getIdealTemp() == 255){
+    setIdealTemp(26);
+  }
 }
 
 void loop() {
@@ -377,6 +381,7 @@ void enterPassCode() {
         }
         Serial.println(packet);
         lcd.clear();
+        currentItemMain = 2;
         LCDState = mainMenu;
       } else {
         lcd.setCursor(0, 2);
@@ -700,7 +705,7 @@ void onSpeed(){
 void onHeater(){
   byte currentTemp = getCurrentTemp();
   byte idealTemp = getIdealTemp();
-  if(currentTemp == idealTemp){
+  if(currentTemp >= idealTemp){
     airState = offAirSystem;
   }
 }
@@ -753,7 +758,9 @@ void fillPersonelList() {
 
 void fillAllTimesToZero() {
   for (int i = 113; i < 142; i++) {
-    EEPROM.update(i, 0);
+    if(EEPROM.read(i) == 255){
+      EEPROM.update(i, 0);
+    }
   }
 }
 
@@ -976,8 +983,14 @@ void initTimerRTC() {
   interrupts();
 }
 
+byte seconds = 0;
 ISR(TIMER1_COMPA_vect) {
-  t = rtc.getTime();
+  seconds++;
+  if(seconds >= 60){
+    t = rtc.getTime();
+    seconds = 0;
+  }
+  
 }
 
 int dayOfWeek(int d, int m, int y)
